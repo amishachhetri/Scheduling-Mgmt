@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { db, NOW_DATE } = require('../db/schema');
+const { db } = require('../db/schema');
 
 // Day-to-day operating data -- what the photographer needs to see and act on daily.
 // Financial trend data (total/monthly/YTD income) lives on GET /business instead, since
@@ -12,10 +12,10 @@ router.get('/', async (req, res) => {
   const monthEnd = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   // Three distinct "money" buckets, kept separate rather than one blended total:
-  // 1. Owed TO him, tied to a booking, only once that shoot has already happened.
+  // 1. Owed TO him, tied to a booking -- any unpaid balance, upcoming shoot or past.
   const moneyOwedBookings = await db.get(`
     SELECT COALESCE(SUM(m.amount), 0) as total FROM money_owed m JOIN bookings b ON m.booking_id = b.id
-    WHERE m.paid = 0 AND b.shoot_date < ${NOW_DATE}
+    WHERE m.paid = 0
   `);
   // 2. Owed TO him, not tied to any booking (a loan, a print order, etc.).
   const moneyOwedManual = await db.get(`

@@ -131,8 +131,14 @@ export default function MoneyOwed() {
       ) : (
         <div className="space-y-2">
           {entries.map(e => {
-            const overdueDays = e.due_date ? daysAgo(e.due_date) : null;
-            const overdue = overdueDays !== null && overdueDays > 0;
+            // Overdue: an explicit due date that's passed, or (for booking balances with no due
+            // date of their own) a shoot date that's already happened -- either way, the money
+            // should've landed by now. A booking balance ahead of its shoot date is still
+            // outstanding, just not late yet, so it gets an "Upcoming" badge instead.
+            const dateForUrgency = e.due_date || e.shoot_date;
+            const urgencyDays = dateForUrgency ? daysAgo(dateForUrgency) : null;
+            const overdue = urgencyDays !== null && urgencyDays > 0;
+            const upcoming = !overdue && e.type === 'booking' && e.shoot_date && urgencyDays < 0;
             return (
               <div key={e.id} className={`bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border ${overdue ? 'border-red-200 dark:border-red-800' : 'border-gray-100 dark:border-gray-700'}`}>
                 <div className="flex items-start justify-between gap-2">
@@ -140,7 +146,8 @@ export default function MoneyOwed() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold dark:text-white">{e.name}</p>
                       {e.type === 'booking' && <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-1.5 py-0.5 rounded">Booking</span>}
-                      {overdue && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">{overdueDays}d overdue</span>}
+                      {overdue && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">{urgencyDays}d overdue</span>}
+                      {upcoming && <span className="text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 px-1.5 py-0.5 rounded">Upcoming</span>}
                     </div>
                     {e.due_date && <p className="text-xs text-gray-500 mt-0.5">Due: {formatDate(e.due_date)}</p>}
                     {e.shoot_date && <p className="text-xs text-gray-400">Shoot: {formatDate(e.shoot_date)} — {e.shoot_type}</p>}

@@ -1,21 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { db, NOW_TS, NOW_DATE } = require('../db/schema');
+const { db, NOW_TS } = require('../db/schema');
 const { v4: uuidv4 } = require('uuid');
 
 router.get('/', async (req, res) => {
   const { paid } = req.query;
   const isPaid = paid === 'true' ? 1 : 0;
-  // Unpaid list only surfaces balances for shoots that have already happened (or manual
-  // entries, which aren't tied to a shoot date) -- a balance on a future shoot isn't
-  // "owed" yet. The paid/history list is unaffected.
-  const dateFilter = isPaid === 0 ? `AND (m.booking_id IS NULL OR b.shoot_date < ${NOW_DATE})` : '';
+  // Unpaid list shows every outstanding balance, whether the shoot already happened or is
+  // still upcoming -- a deposit/balance can be due well before the shoot date, so "not yet
+  // paid" is the only thing that should gate this, not whether the shoot has occurred.
   const rows = await db.all(`
     SELECT m.*,
       b.shoot_type, b.shoot_date
     FROM money_owed m
     LEFT JOIN bookings b ON m.booking_id = b.id
-    WHERE m.paid = ? ${dateFilter}
+    WHERE m.paid = ?
     ORDER BY m.due_date ASC, m.created_at ASC
   `, [isPaid]);
   res.json(rows);
