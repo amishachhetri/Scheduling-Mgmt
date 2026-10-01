@@ -76,11 +76,6 @@ async function runDailyTasks() {
 // Run daily at 8am
 cron.schedule('0 8 * * *', runDailyTasks);
 
-// Regenerate reminders every hour
-cron.schedule('0 * * * *', () => {
-  generateReminders().catch(console.error);
-});
-
 // Run once on startup
 setTimeout(() => generateReminders().catch(console.error), 2000);
 
