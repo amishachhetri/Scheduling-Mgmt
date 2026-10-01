@@ -366,6 +366,7 @@ router.delete('/:id', async (req, res) => {
   await db.run('DELETE FROM money_owed WHERE booking_id = ?', [req.params.id]);
   await db.run('DELETE FROM reminders WHERE booking_id = ?', [req.params.id]);
   await db.run('DELETE FROM booking_events WHERE booking_id = ?', [req.params.id]);
+  await db.run('DELETE FROM message_log WHERE booking_id = ?', [req.params.id]);
   await db.run('DELETE FROM bookings WHERE id = ?', [req.params.id]);
   await db.run('UPDATE clients SET total_shoots = GREATEST(0, total_shoots - 1) WHERE id = ?', [booking.client_id]);
   res.json({ success: true });
