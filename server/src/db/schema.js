@@ -319,7 +319,17 @@ async function initDB() {
     ALTER TABLE photographer_profile ADD COLUMN IF NOT EXISTS default_extra_photo_price REAL DEFAULT 15;
     ALTER TABLE packages ADD COLUMN IF NOT EXISTS extra_photo_price REAL;
     ALTER TABLE photographer_profile ADD COLUMN IF NOT EXISTS last_daily_run_date TEXT;
+    ALTER TABLE photographer_profile ADD COLUMN IF NOT EXISTS admin_password_hash TEXT;
   `);
+
+  // One-time backfill: the admin password used to live only in the ADMIN_PASSWORD_HASH env var
+  // (which the running app can never update itself, so a self-service "change password" feature
+  // needs it in the database instead). Seeds the DB from the env var once so existing logins
+  // keep working unchanged; a changed password afterward just lives in the DB from then on.
+  const needsPasswordHash = await db.get('SELECT admin_password_hash FROM photographer_profile WHERE id = 1');
+  if (needsPasswordHash && !needsPasswordHash.admin_password_hash && process.env.ADMIN_PASSWORD_HASH) {
+    await db.run('UPDATE photographer_profile SET admin_password_hash = ? WHERE id = 1', [process.env.ADMIN_PASSWORD_HASH]);
+  }
 
   // Enforces what referenceCode.js's collision retry already assumes. A nullable column with a
   // UNIQUE index is fine in Postgres -- NULLs (bookings that haven't been finalized/quoted yet)

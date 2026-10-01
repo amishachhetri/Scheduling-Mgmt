@@ -18,7 +18,7 @@ router.post('/login', loginLimiter, async (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: 'Password required' });
 
-  if (!verifyPassword(password)) {
+  if (!(await verifyPassword(password))) {
     return res.status(401).json({ error: 'Incorrect password' });
   }
 

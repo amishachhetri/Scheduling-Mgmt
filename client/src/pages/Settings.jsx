@@ -132,7 +132,44 @@ function ProfileTab() {
       </Card>
 
       <button onClick={save} className="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-semibold transition-colors">Save Changes</button>
+
+      <ChangePasswordCard />
     </div>
+  );
+}
+
+function ChangePasswordCard() {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!current || !next || !confirm) return toast.error('Fill in all three fields');
+    if (next.length < 8) return toast.error('New password must be at least 8 characters');
+    if (next !== confirm) return toast.error('New passwords don\'t match');
+    setSaving(true);
+    try {
+      await api.post('/profile/change-password', { current_password: current, new_password: next });
+      toast.success('Password changed — redirecting to login…');
+      setTimeout(() => { window.location.href = '/admin/login'; }, 1500);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to change password');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card title="Change Password">
+      <Field label="Current password"><input type="password" value={current} onChange={e => setCurrent(e.target.value)} className={inp()} /></Field>
+      <Field label="New password"><input type="password" value={next} onChange={e => setNext(e.target.value)} className={inp()} /></Field>
+      <Field label="Confirm new password"><input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} className={inp()} /></Field>
+      <button onClick={submit} disabled={saving}
+        className="w-full py-3 bg-gray-800 hover:bg-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 text-white rounded-xl font-semibold transition-colors disabled:opacity-50">
+        {saving ? 'Changing…' : 'Change Password'}
+      </button>
+      <p className="text-xs text-gray-400 mt-2">You'll be logged out everywhere and need to sign back in with the new password.</p>
+    </Card>
   );
 }
 

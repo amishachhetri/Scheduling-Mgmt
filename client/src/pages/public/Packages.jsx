@@ -52,7 +52,7 @@ export default function Packages() {
               <div key={pkg.id} className="border border-line rounded-md p-5 bg-paper-raised flex flex-col gap-2.5">
                 <div className="font-display text-lg">{pkg.name}</div>
                 <p className="text-sm text-ink-soft leading-relaxed flex-1">{pkg.description}</p>
-                <div className="font-mono text-xl pt-1 border-t border-line">${pkg.price.toLocaleString()}</div>
+                <div className="font-mono text-xl pt-1 border-t border-line">{pkg.shoot_type?.toLowerCase().includes('multi-day') ? 'Starting at ' : ''}${pkg.price.toLocaleString()}</div>
                 <button onClick={() => navigate(`/book?package=${pkg.id}`)}
                   className="bg-accent text-white text-sm font-semibold py-2.5 rounded mt-1">
                   Select

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const { db, NOW_TS } = require('../db/schema');
+const { verifyPassword } = require('../middleware/adminAuth');
 
 function maskSecrets(profile) {
   if (!profile) return profile;
@@ -52,6 +53,22 @@ router.put('/', async (req, res) => {
 
   const updated = await db.get('SELECT * FROM photographer_profile WHERE id = 1');
   res.json(maskSecrets(updated));
+});
+
+// POST /api/profile/change-password -- forces re-login everywhere afterward (including this
+// session), same as most apps do, so a changed password is confirmed to actually work.
+router.post('/change-password', async (req, res) => {
+  const { current_password, new_password } = req.body;
+  if (!current_password || !new_password) return res.status(400).json({ error: 'current_password and new_password required' });
+  if (new_password.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  if (!(await verifyPassword(current_password))) return res.status(401).json({ error: 'Current password is incorrect' });
+
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(new_password, salt, 64).toString('hex');
+  await db.run('UPDATE photographer_profile SET admin_password_hash = ? WHERE id = 1', [`${salt}:${hash}`]);
+  await db.run('DELETE FROM admin_sessions');
+  res.clearCookie('admin_session');
+  res.json({ success: true });
 });
 
 // POST /api/profile/regenerate-ics-token — invalidates the current calendar feed link (e.g. if

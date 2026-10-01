@@ -5,11 +5,15 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-// Verifies a plaintext password attempt against the scrypt hash in ADMIN_PASSWORD_HASH
-// (format "salt:hash", both hex). Timing-safe so failed attempts can't be used to guess bytes.
-function verifyPassword(attempt) {
-  const stored = process.env.ADMIN_PASSWORD_HASH;
-  if (!stored || !attempt) return false;
+// Verifies a plaintext password attempt against the scrypt hash (format "salt:hash", both hex)
+// -- the database value if one's been set (e.g. via a self-service password change), falling
+// back to the original ADMIN_PASSWORD_HASH env var otherwise. Timing-safe so failed attempts
+// can't be used to guess bytes.
+async function verifyPassword(attempt) {
+  if (!attempt) return false;
+  const profile = await db.get('SELECT admin_password_hash FROM photographer_profile WHERE id = 1');
+  const stored = profile?.admin_password_hash || process.env.ADMIN_PASSWORD_HASH;
+  if (!stored) return false;
   const [salt, hash] = stored.split(':');
   if (!salt || !hash) return false;
   const attemptHash = crypto.scryptSync(attempt, salt, 64);
