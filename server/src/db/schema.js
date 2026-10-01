@@ -5,13 +5,13 @@ const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error('POSTGRES_URL (or DATABASE_URL) is not set -- see .env.example');
 }
-// Hosted Postgres (Neon/Vercel Postgres) requires SSL; a local dev database doesn't have it
-// configured at all, so forcing SSL there would just fail every connection.
+// Hosted Postgres (Neon/Vercel Postgres) connection strings already carry their own
+// `sslmode`/`channel_binding` query params -- passing a separate `ssl` object here overrides
+// and conflicts with that negotiation (Neon's pooler drops the connection mid-handshake when
+// both are present). A local dev database has no SSL configured at all, so it needs `ssl: false`
+// explicitly; a hosted one just needs the connection string left alone.
 const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
-const pool = new Pool({
-  connectionString,
-  ssl: isLocal ? false : { rejectUnauthorized: false }
-});
+const pool = new Pool(isLocal ? { connectionString, ssl: false } : { connectionString });
 
 // Every column that used to default to SQLite's datetime('now')/date('now') (always UTC) is
 // kept as a plain TEXT column in the exact same 'YYYY-MM-DD HH:MM:SS' / 'YYYY-MM-DD' format --
