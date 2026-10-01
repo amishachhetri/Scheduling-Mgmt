@@ -146,6 +146,14 @@ router.put('/:id', async (req, res) => {
   const disc = discount !== undefined ? parseFloat(discount) : (existing.discount || 0);
   const deposit = deposit_amount !== undefined ? parseFloat(deposit_amount) : existing.deposit_amount;
   const balance = Math.max(0, price - disc - deposit);
+  const depositNowReceived = deposit_received !== undefined ? (deposit_received ? 1 : 0) : existing.deposit_received;
+
+  // Checking "deposit received" auto-advances a booking still sitting at the very first stage --
+  // but never rewinds one that's already further along, since that stage's own history already
+  // accounts for the deposit however it actually happened.
+  const justReceivedDeposit = depositNowReceived === 1 && !existing.deposit_received;
+  const shouldAdvanceStage = justReceivedDeposit && existing.workflow_stage === STAGES[0];
+  const newStage = shouldAdvanceStage ? STAGES[1] : existing.workflow_stage;
 
   await db.run(`
     UPDATE bookings SET
@@ -156,6 +164,8 @@ router.put('/:id', async (req, res) => {
       notes = ?, status = ?,
       gallery_link = COALESCE(?, gallery_link),
       contract_signed = COALESCE(?, contract_signed),
+      workflow_stage = ?,
+      workflow_stage_updated_at = CASE WHEN ? THEN ${NOW_TS} ELSE workflow_stage_updated_at END,
       updated_at = ${NOW_TS}
     WHERE id = ?
   `, [
@@ -164,11 +174,17 @@ router.put('/:id', async (req, res) => {
     shoot_date ?? existing.shoot_date, shoot_time ?? existing.shoot_time,
     shoot_end_time ?? existing.shoot_end_time, location ?? existing.location,
     package_id ?? existing.package_id, package_name ?? existing.package_name, price, disc,
-    deposit, deposit_received !== undefined ? (deposit_received ? 1 : 0) : existing.deposit_received, balance,
+    deposit, depositNowReceived, balance,
     notes ?? existing.notes, status ?? existing.status,
     gallery_link ?? null, contract_signed !== undefined ? (contract_signed ? 1 : 0) : null,
+    newStage, shouldAdvanceStage,
     req.params.id
   ]);
+
+  if (shouldAdvanceStage) {
+    await db.run('INSERT INTO workflow_notes (id, booking_id, stage, note) VALUES (?, ?, ?, ?)',
+      [uuidv4(), req.params.id, STAGES[1], 'Deposit marked received — advanced to Deposit received.']);
+  }
 
   // Sync money owed
   const moe = await db.get('SELECT * FROM money_owed WHERE booking_id = ? AND paid = 0', [req.params.id]);
