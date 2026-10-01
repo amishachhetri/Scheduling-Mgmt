@@ -40,6 +40,20 @@ router.put('/:id', async (req, res) => {
   res.json(await db.get('SELECT * FROM clients WHERE id = ?', [req.params.id]));
 });
 
+// Only removable once it has no shoot history -- a client with real bookings should be
+// deleted by removing those bookings first, not silently along with them.
+router.delete('/:id', async (req, res) => {
+  const existing = await db.get('SELECT * FROM clients WHERE id = ?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const bookingCount = await db.get('SELECT COUNT(*)::int as count FROM bookings WHERE client_id = ?', [req.params.id]);
+  if (bookingCount.count > 0) {
+    return res.status(400).json({ error: 'This client still has bookings. Delete those first.' });
+  }
+  await db.run('DELETE FROM message_log WHERE client_id = ?', [req.params.id]);
+  await db.run('DELETE FROM clients WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
 router.get('/:id', async (req, res) => {
   const client = await db.get('SELECT * FROM clients WHERE id = ?', [req.params.id]);
   if (!client) return res.status(404).json({ error: 'Not found' });
