@@ -14,7 +14,7 @@ router.get('/', adminAuth, async (req, res) => {
   if (start) { bookingQ += ' AND shoot_date >= ?'; params.push(start); }
   if (end) { bookingQ += ' AND shoot_date <= ?'; params.push(end); }
 
-  const bookings = db.prepare(bookingQ).all(...params);
+  const bookings = await db.all(bookingQ, params);
 
   // Overlap match (not just `date >= start`) so a multi-day block that started before this
   // range still shows up on the days of the range it covers.
@@ -22,7 +22,7 @@ router.get('/', adminAuth, async (req, res) => {
   const bParams = [];
   if (end) { blockedQ += ' AND date <= ?'; bParams.push(end); }
   if (start) { blockedQ += ' AND COALESCE(end_date, date) >= ?'; bParams.push(start); }
-  const blockedRows = db.prepare(blockedQ).all(...bParams);
+  const blockedRows = await db.all(blockedQ, bParams);
 
   // Expand each row into one calendar entry per day it covers, clipped to [start, end].
   const blocked = [];
@@ -45,8 +45,8 @@ router.get('/', adminAuth, async (req, res) => {
     : `SELECT be.*, b.client_name, b.id as booking_id, b.status, b.workflow_stage
        FROM booking_events be JOIN bookings b ON be.booking_id = b.id WHERE b.status NOT IN ('Cancelled','Denied','Requested')`;
   const multiDayItems = start && end
-    ? db.prepare(multiDayEventsQ).all(start, end)
-    : db.prepare(multiDayEventsQ).all();
+    ? await db.all(multiDayEventsQ, [start, end])
+    : await db.all(multiDayEventsQ);
 
   const events = [
     ...bookings.map(b => ({

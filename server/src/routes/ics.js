@@ -55,12 +55,12 @@ function wrapICS(vevents) {
 // GET /api/ics?token=...  — full calendar (for subscription). Deliberately unauthenticated
 // (calendar apps can't send a login session) but gated on a private per-photographer token so
 // the URL isn't a plain, guessable window into every client's name/notes/balance due.
-router.get('/', (req, res) => {
-  const profile = db.prepare('SELECT ics_feed_token FROM photographer_profile WHERE id = 1').get();
+router.get('/', async (req, res) => {
+  const profile = await db.get('SELECT ics_feed_token FROM photographer_profile WHERE id = 1');
   if (!profile?.ics_feed_token || req.query.token !== profile.ics_feed_token) {
     return res.status(401).json({ error: 'Invalid or missing calendar feed token' });
   }
-  const bookings = db.prepare("SELECT * FROM bookings WHERE status NOT IN ('Denied','Requested') ORDER BY shoot_date ASC").all();
+  const bookings = await db.all("SELECT * FROM bookings WHERE status NOT IN ('Denied','Requested') ORDER BY shoot_date ASC");
   const ics = wrapICS(bookings.map(bookingToVEVENT));
   res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
   res.setHeader('Content-Disposition', 'inline; filename="shoots.ics"');
@@ -69,8 +69,8 @@ router.get('/', (req, res) => {
 
 // GET /api/ics/:id  — single booking download. Only ever linked from the authenticated admin
 // booking detail page, so (unlike the feed above) it's gated on the normal admin session.
-router.get('/:id', adminAuth, (req, res) => {
-  const b = db.prepare('SELECT * FROM bookings WHERE id = ?').get(req.params.id);
+router.get('/:id', adminAuth, async (req, res) => {
+  const b = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
   if (!b) return res.status(404).json({ error: 'Not found' });
   const ics = wrapICS([bookingToVEVENT(b)]);
   res.setHeader('Content-Type', 'text/calendar; charset=utf-8');

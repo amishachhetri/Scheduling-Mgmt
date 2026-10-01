@@ -7,10 +7,10 @@ const { adminAuth } = require('../middleware/adminAuth');
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 // GET /api/calendar/google/status
-router.get('/status', adminAuth, (req, res) => {
-  const p = gcal.getProfile();
+router.get('/status', adminAuth, async (req, res) => {
+  const p = await gcal.getProfile();
   res.json({
-    connected: gcal.isConnected(),
+    connected: await gcal.isConnected(),
     has_credentials: !!(p?.google_oauth_client_id && p?.google_oauth_client_secret),
     last_synced: p?.google_last_synced || null,
     calendar_id: p?.google_calendar_id || 'primary',
@@ -18,17 +18,17 @@ router.get('/status', adminAuth, (req, res) => {
 });
 
 // POST /api/calendar/google/credentials  — save client ID + secret
-router.post('/credentials', adminAuth, (req, res) => {
+router.post('/credentials', adminAuth, async (req, res) => {
   const { client_id, client_secret, calendar_id } = req.body;
   if (!client_id || !client_secret) return res.status(400).json({ error: 'client_id and client_secret required' });
-  db.prepare("UPDATE photographer_profile SET google_oauth_client_id = ?, google_oauth_client_secret = ?, google_calendar_id = ? WHERE id = 1")
-    .run(client_id, client_secret, calendar_id || 'primary');
+  await db.run("UPDATE photographer_profile SET google_oauth_client_id = ?, google_oauth_client_secret = ?, google_calendar_id = ? WHERE id = 1",
+    [client_id, client_secret, calendar_id || 'primary']);
   res.json({ ok: true });
 });
 
 // GET /api/calendar/google/auth  — start OAuth flow
-router.get('/auth', adminAuth, (req, res) => {
-  const p = gcal.getProfile();
+router.get('/auth', adminAuth, async (req, res) => {
+  const p = await gcal.getProfile();
   if (!p?.google_oauth_client_id || !p?.google_oauth_client_secret) {
     return res.status(400).json({ error: 'No OAuth credentials configured. Enter them in Settings first.' });
   }
@@ -65,8 +65,8 @@ router.post('/sync', adminAuth, async (req, res) => {
 });
 
 // DELETE /api/calendar/google/disconnect
-router.delete('/disconnect', adminAuth, (req, res) => {
-  db.prepare("UPDATE photographer_profile SET google_oauth_refresh_token = NULL, google_last_synced = NULL WHERE id = 1").run();
+router.delete('/disconnect', adminAuth, async (req, res) => {
+  await db.run("UPDATE photographer_profile SET google_oauth_refresh_token = NULL, google_last_synced = NULL WHERE id = 1");
   res.json({ ok: true });
 });
 

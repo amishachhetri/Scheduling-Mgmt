@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { db } = require('../db/schema');
+const { db, NOW_TS } = require('../db/schema');
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -19,20 +19,20 @@ function verifyPassword(attempt) {
 }
 
 // Protects admin routes with the session cookie set by /api/admin/auth/verify.
-function adminAuth(req, res, next) {
+async function adminAuth(req, res, next) {
   const raw = req.cookies?.admin_session;
   if (!raw) return res.status(401).json({ error: 'Unauthorized' });
 
   const tokenHash = hashToken(raw);
-  const session = db.prepare(
-    "SELECT * FROM admin_sessions WHERE token_hash = ? AND expires_at > datetime('now')"
-  ).get(tokenHash);
+  const session = await db.get(
+    `SELECT * FROM admin_sessions WHERE token_hash = ? AND expires_at > ${NOW_TS}`, [tokenHash]
+  );
 
   if (!session) return res.status(401).json({ error: 'Unauthorized' });
 
   // Throttle last_seen_at updates to roughly once per hour to avoid a write on every request.
   if (new Date(session.last_seen_at) < new Date(Date.now() - 60 * 60 * 1000)) {
-    db.prepare("UPDATE admin_sessions SET last_seen_at = datetime('now') WHERE id = ?").run(session.id);
+    await db.run(`UPDATE admin_sessions SET last_seen_at = ${NOW_TS} WHERE id = ?`, [session.id]);
   }
 
   req.admin = { sessionId: session.id };

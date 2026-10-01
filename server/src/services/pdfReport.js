@@ -21,12 +21,12 @@ const PAGE_WIDTH = PAGE_RIGHT - PAGE_LEFT;
 const INCOME_EXPR = `CASE WHEN deposit_received = 1 THEN package_price - COALESCE(discount,0) - balance_due ELSE 0 END`;
 const NOT_CANCELLED = `status NOT IN ('Cancelled','Denied','Requested')`;
 
-function streamAnnualReportPDF(res, year) {
-  const profile = db.prepare('SELECT name, business_name FROM photographer_profile WHERE id = 1').get();
-  const income = db.prepare(`SELECT COALESCE(SUM(${INCOME_EXPR}), 0) as total FROM bookings WHERE ${NOT_CANCELLED} AND strftime('%Y', shoot_date) = ?`).get(String(year));
-  const expenseRows = db.prepare(`SELECT description, amount, date, category, mileage FROM expenses WHERE strftime('%Y', date) = ? ORDER BY date ASC`).all(String(year));
+async function streamAnnualReportPDF(res, year) {
+  const profile = await db.get('SELECT name, business_name FROM photographer_profile WHERE id = 1');
+  const income = await db.get(`SELECT COALESCE(SUM(${INCOME_EXPR}), 0) as total FROM bookings WHERE ${NOT_CANCELLED} AND TO_CHAR(shoot_date::date, 'YYYY') = ?`, [String(year)]);
+  const expenseRows = await db.all(`SELECT description, amount, date, category, mileage FROM expenses WHERE TO_CHAR(date::date, 'YYYY') = ? ORDER BY date ASC`, [String(year)]);
   const expensesTotal = expenseRows.reduce((sum, e) => sum + (e.amount || 0), 0);
-  const ssPayments = db.prepare(`SELECT COALESCE(SUM(ss.pay_amount), 0) as total FROM second_shooters ss JOIN bookings b ON ss.booking_id = b.id WHERE ss.paid = 1 AND strftime('%Y', b.shoot_date) = ?`).get(String(year));
+  const ssPayments = await db.get(`SELECT COALESCE(SUM(ss.pay_amount), 0) as total FROM second_shooters ss JOIN bookings b ON ss.booking_id = b.id WHERE ss.paid = 1 AND TO_CHAR(b.shoot_date::date, 'YYYY') = ?`, [String(year)]);
   const netProfit = income.total - expensesTotal - ssPayments.total;
   const estimatedTax = Math.max(0, netProfit * 0.25);
 

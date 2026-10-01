@@ -1,13 +1,13 @@
 const { db } = require('../db/schema');
 const { v4: uuidv4 } = require('uuid');
 
-function generateReminders() {
+async function generateReminders() {
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
 
-  db.prepare(`DELETE FROM reminders WHERE type IN ('no_followup', 'balance_unpaid', 'workflow_stuck', 'ss_payment', 'contract_unsigned') AND dismissed = 0`).run();
+  await db.run(`DELETE FROM reminders WHERE type IN ('no_followup', 'balance_unpaid', 'workflow_stuck', 'ss_payment', 'contract_unsigned') AND dismissed = 0`);
 
-  const bookings = db.prepare(`SELECT * FROM bookings WHERE status NOT IN ('Completed', 'Cancelled', 'Denied', 'Requested')`).all();
+  const bookings = await db.all(`SELECT * FROM bookings WHERE status NOT IN ('Completed', 'Cancelled', 'Denied', 'Requested')`);
 
   const inserts = [];
 
@@ -28,7 +28,7 @@ function generateReminders() {
     }
 
     if (daysUntilShoot > 0 && daysUntilShoot <= 30) {
-      const lastMsg = db.prepare(`SELECT MAX(sent_at) as last FROM message_log WHERE booking_id = ?`).get(b.id);
+      const lastMsg = await db.get(`SELECT MAX(sent_at) as last FROM message_log WHERE booking_id = ?`, [b.id]);
       if (!lastMsg?.last) {
         inserts.push([uuidv4(), b.id, 'no_followup', `You haven't followed up with ${b.client_name} — shoot in ${daysUntilShoot} days`]);
       } else {
@@ -45,19 +45,18 @@ function generateReminders() {
     }
   }
 
-  const pendingSS = db.prepare(`
+  const pendingSS = await db.all(`
     SELECT ss.*, b.client_name as shoot_client, b.shoot_date
     FROM second_shooters ss JOIN bookings b ON ss.booking_id = b.id
     WHERE ss.paid = 0 AND b.shoot_date < ?
-  `).all(todayStr);
+  `, [todayStr]);
 
   for (const ss of pendingSS) {
     inserts.push([uuidv4(), ss.booking_id, 'ss_payment', `Second shooter payment pending: ${ss.name} for ${ss.shoot_client}'s shoot`]);
   }
 
-  if (inserts.length > 0) {
-    const insert = db.prepare('INSERT INTO reminders (id, booking_id, type, message) VALUES (?, ?, ?, ?)');
-    db.transaction((rows) => { for (const row of rows) insert.run(...row); })(inserts);
+  for (const row of inserts) {
+    await db.run('INSERT INTO reminders (id, booking_id, type, message) VALUES (?, ?, ?, ?)', row);
   }
 }
 

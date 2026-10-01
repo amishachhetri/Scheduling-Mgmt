@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db/schema');
+const { db, NOW_TS } = require('../db/schema');
 const { v4: uuidv4 } = require('uuid');
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { archived } = req.query;
-  const rows = db.prepare(`
+  const rows = await db.all(`
     SELECT * FROM packages WHERE archived = ? ORDER BY name ASC
-  `).all(archived === 'true' ? 1 : 0);
+  `, [archived === 'true' ? 1 : 0]);
   res.json(rows);
 });
 
@@ -20,7 +20,7 @@ function normalizePrice(v) {
   return Number.isNaN(n) ? null : n;
 }
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { description, price, shoot_type, is_full_day, duration_minutes, included_photo_count, extra_photo_price } = req.body;
   const name = req.body.name?.trim();
   if (!name || price === undefined) return res.status(400).json({ error: 'name and price required' });
@@ -30,15 +30,15 @@ router.post('/', (req, res) => {
   if (extraPrice !== null && extraPrice < 0) return res.status(400).json({ error: 'extra_photo_price must be a non-negative number' });
 
   const id = uuidv4();
-  db.prepare(`
+  await db.run(`
     INSERT INTO packages (id, name, description, price, shoot_type, is_full_day, duration_minutes, included_photo_count, extra_photo_price)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, description, parsedPrice, shoot_type, is_full_day ? 1 : 0, duration_minutes || 120, included_photo_count || 0, extraPrice);
-  res.json(db.prepare('SELECT * FROM packages WHERE id = ?').get(id));
+  `, [id, name, description, parsedPrice, shoot_type, is_full_day ? 1 : 0, duration_minutes || 120, included_photo_count || 0, extraPrice]);
+  res.json(await db.get('SELECT * FROM packages WHERE id = ?', [id]));
 });
 
-router.put('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM packages WHERE id = ?').get(req.params.id);
+router.put('/:id', async (req, res) => {
+  const existing = await db.get('SELECT * FROM packages WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
   const { description, price, shoot_type, archived, is_full_day, duration_minutes, included_photo_count, extra_photo_price } = req.body;
@@ -50,24 +50,24 @@ router.put('/:id', (req, res) => {
   const extraPrice = extra_photo_price !== undefined ? normalizePrice(extra_photo_price) : existing.extra_photo_price;
   if (extraPrice !== null && extraPrice < 0) return res.status(400).json({ error: 'extra_photo_price must be a non-negative number' });
 
-  db.prepare(`
+  await db.run(`
     UPDATE packages SET name = ?, description = ?, price = ?, shoot_type = ?, archived = ?, is_full_day = ?, duration_minutes = ?,
-      included_photo_count = ?, extra_photo_price = ?, updated_at = datetime('now')
+      included_photo_count = ?, extra_photo_price = ?, updated_at = ${NOW_TS}
     WHERE id = ?
-  `).run(
+  `, [
     name, description ?? existing.description, parsedPrice, shoot_type ?? existing.shoot_type,
     archived !== undefined ? (archived ? 1 : 0) : existing.archived,
     is_full_day !== undefined ? (is_full_day ? 1 : 0) : existing.is_full_day,
     duration_minutes ?? existing.duration_minutes,
     included_photo_count ?? existing.included_photo_count, extraPrice, req.params.id
-  );
-  res.json(db.prepare('SELECT * FROM packages WHERE id = ?').get(req.params.id));
+  ]);
+  res.json(await db.get('SELECT * FROM packages WHERE id = ?', [req.params.id]));
 });
 
-router.delete('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM packages WHERE id = ?').get(req.params.id);
+router.delete('/:id', async (req, res) => {
+  const existing = await db.get('SELECT * FROM packages WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  db.prepare('DELETE FROM packages WHERE id = ?').run(req.params.id);
+  await db.run('DELETE FROM packages WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
 

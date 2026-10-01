@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const { db } = require('../db/schema');
+const { db, NOW_TS } = require('../db/schema');
 
 const REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI || 'http://localhost:5001/api/calendar/google/callback';
 // No per-photographer timezone setting exists yet, so this defaults to wherever the server
@@ -7,12 +7,12 @@ const REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI || 'http://localhost:
 // server and photographer are ever in different zones.
 const CALENDAR_TIMEZONE = process.env.GCAL_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-function getProfile() {
-  return db.prepare('SELECT * FROM photographer_profile WHERE id = 1').get();
+async function getProfile() {
+  return db.get('SELECT * FROM photographer_profile WHERE id = 1');
 }
 
-function getOAuth2Client(profile) {
-  if (!profile) profile = getProfile();
+async function getOAuth2Client(profile) {
+  if (!profile) profile = await getProfile();
   if (!profile?.google_oauth_client_id || !profile?.google_oauth_client_secret) return null;
   const client = new google.auth.OAuth2(
     profile.google_oauth_client_id,
@@ -25,8 +25,8 @@ function getOAuth2Client(profile) {
   return client;
 }
 
-function isConnected() {
-  const p = getProfile();
+async function isConnected() {
+  const p = await getProfile();
   return !!(p?.google_oauth_client_id && p?.google_oauth_client_secret && p?.google_oauth_refresh_token);
 }
 
@@ -40,12 +40,12 @@ function getAuthUrl(clientId, clientSecret) {
 }
 
 async function exchangeCode(code) {
-  const p = getProfile();
-  const client = getOAuth2Client(p);
+  const p = await getProfile();
+  const client = await getOAuth2Client(p);
   if (!client) throw new Error('OAuth client not configured');
   const { tokens } = await client.getToken(code);
-  db.prepare("UPDATE photographer_profile SET google_oauth_refresh_token = ?, google_last_synced = datetime('now') WHERE id = 1")
-    .run(tokens.refresh_token || p.google_oauth_refresh_token);
+  await db.run(`UPDATE photographer_profile SET google_oauth_refresh_token = ?, google_last_synced = ${NOW_TS} WHERE id = 1`,
+    [tokens.refresh_token || p.google_oauth_refresh_token]);
   return tokens;
 }
 
@@ -69,25 +69,25 @@ function bookingToGCalEvent(booking) {
 }
 
 async function createEvent(booking) {
-  if (!isConnected()) return null;
+  if (!(await isConnected())) return null;
   try {
-    const p = getProfile();
-    const auth = getOAuth2Client(p);
+    const p = await getProfile();
+    const auth = await getOAuth2Client(p);
     const cal = google.calendar({ version: 'v3', auth });
     const res = await cal.events.insert({
       calendarId: p.google_calendar_id || 'primary',
       resource: bookingToGCalEvent(booking),
     });
-    db.prepare("UPDATE bookings SET google_calendar_event_id = ? WHERE id = ?").run(res.data.id, booking.id);
+    await db.run('UPDATE bookings SET google_calendar_event_id = ? WHERE id = ?', [res.data.id, booking.id]);
     return res.data.id;
   } catch (e) { console.error('[GCal] createEvent:', e.message); return null; }
 }
 
 async function updateEvent(booking) {
-  if (!isConnected() || !booking.google_calendar_event_id) return;
+  if (!(await isConnected()) || !booking.google_calendar_event_id) return;
   try {
-    const p = getProfile();
-    const auth = getOAuth2Client(p);
+    const p = await getProfile();
+    const auth = await getOAuth2Client(p);
     const cal = google.calendar({ version: 'v3', auth });
     await cal.events.update({
       calendarId: p.google_calendar_id || 'primary',
@@ -98,10 +98,10 @@ async function updateEvent(booking) {
 }
 
 async function deleteEvent(booking) {
-  if (!isConnected() || !booking.google_calendar_event_id) return;
+  if (!(await isConnected()) || !booking.google_calendar_event_id) return;
   try {
-    const p = getProfile();
-    const auth = getOAuth2Client(p);
+    const p = await getProfile();
+    const auth = await getOAuth2Client(p);
     const cal = google.calendar({ version: 'v3', auth });
     await cal.events.delete({
       calendarId: p.google_calendar_id || 'primary',
@@ -111,8 +111,8 @@ async function deleteEvent(booking) {
 }
 
 async function syncAll() {
-  if (!isConnected()) return { synced: 0 };
-  const bookings = db.prepare("SELECT * FROM bookings WHERE status != 'Cancelled'").all();
+  if (!(await isConnected())) return { synced: 0 };
+  const bookings = await db.all("SELECT * FROM bookings WHERE status != 'Cancelled'");
   let synced = 0;
   for (const b of bookings) {
     if (b.google_calendar_event_id) {
@@ -122,16 +122,16 @@ async function syncAll() {
     }
     synced++;
   }
-  db.prepare("UPDATE photographer_profile SET google_last_synced = datetime('now') WHERE id = 1").run();
+  await db.run(`UPDATE photographer_profile SET google_last_synced = ${NOW_TS} WHERE id = 1`);
   return { synced };
 }
 
 // Fetch Google Calendar events to display as blocked time in the app
 async function fetchExternalEvents(start, end) {
-  if (!isConnected()) return [];
+  if (!(await isConnected())) return [];
   try {
-    const p = getProfile();
-    const auth = getOAuth2Client(p);
+    const p = await getProfile();
+    const auth = await getOAuth2Client(p);
     const cal = google.calendar({ version: 'v3', auth });
     const res = await cal.events.list({
       calendarId: p.google_calendar_id || 'primary',

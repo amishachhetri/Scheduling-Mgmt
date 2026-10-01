@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { db } = require('../db/schema');
+const { db, NOW_TS } = require('../db/schema');
 
 function maskSecrets(profile) {
   if (!profile) return profile;
@@ -15,12 +15,12 @@ function maskSecrets(profile) {
   return profile;
 }
 
-router.get('/', (req, res) => {
-  const profile = db.prepare('SELECT * FROM photographer_profile WHERE id = 1').get();
+router.get('/', async (req, res) => {
+  const profile = await db.get('SELECT * FROM photographer_profile WHERE id = 1');
   res.json(maskSecrets(profile));
 });
 
-router.put('/', (req, res) => {
+router.put('/', async (req, res) => {
   const {
     name, email, phone, business_name,
     smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from,
@@ -29,11 +29,11 @@ router.put('/', (req, res) => {
     bio, avatar_url, cover_photo_url, instagram_url, default_extra_photo_price
   } = req.body;
 
-  const existing = db.prepare('SELECT smtp_pass, twilio_auth_token FROM photographer_profile WHERE id = 1').get();
+  const existing = await db.get('SELECT smtp_pass, twilio_auth_token FROM photographer_profile WHERE id = 1');
   const finalPass = smtp_pass === '****' ? existing?.smtp_pass : smtp_pass;
   const finalTwilioToken = twilio_auth_token === '****' ? existing?.twilio_auth_token : twilio_auth_token;
 
-  db.prepare(`
+  await db.run(`
     UPDATE photographer_profile SET
       name = ?, email = ?, phone = ?, business_name = ?,
       smtp_host = ?, smtp_port = ?, smtp_user = ?, smtp_pass = ?, smtp_from = ?,
@@ -41,25 +41,25 @@ router.put('/', (req, res) => {
       twilio_account_sid = ?, twilio_auth_token = ?, twilio_from_number = ?,
       bio = ?, avatar_url = ?, cover_photo_url = ?, instagram_url = ?,
       default_extra_photo_price = ?,
-      updated_at = datetime('now')
+      updated_at = ${NOW_TS}
     WHERE id = 1
-  `).run(
+  `, [
     name, email, phone, business_name, smtp_host, smtp_port, smtp_user, finalPass, smtp_from, buffer_hours,
     twilio_account_sid || null, finalTwilioToken || null, twilio_from_number || null,
     bio || null, avatar_url || null, cover_photo_url || null, instagram_url || null,
     default_extra_photo_price ?? 15
-  );
+  ]);
 
-  const updated = db.prepare('SELECT * FROM photographer_profile WHERE id = 1').get();
+  const updated = await db.get('SELECT * FROM photographer_profile WHERE id = 1');
   res.json(maskSecrets(updated));
 });
 
 // POST /api/profile/regenerate-ics-token — invalidates the current calendar feed link (e.g. if
 // it leaked) and issues a new one. Existing subscriptions in Apple Calendar/Outlook will need
 // to be re-added with the new URL.
-router.post('/regenerate-ics-token', (req, res) => {
+router.post('/regenerate-ics-token', async (req, res) => {
   const token = crypto.randomBytes(24).toString('hex');
-  db.prepare('UPDATE photographer_profile SET ics_feed_token = ? WHERE id = 1').run(token);
+  await db.run('UPDATE photographer_profile SET ics_feed_token = ? WHERE id = 1', [token]);
   res.json({ ics_feed_token: token });
 });
 

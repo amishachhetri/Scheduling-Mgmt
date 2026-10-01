@@ -1,4 +1,4 @@
-const { db } = require('../db/schema');
+const { db, NOW_TS } = require('../db/schema');
 const { v4: uuidv4 } = require('uuid');
 const { sendTemplateEmail } = require('./email');
 const { sendTemplateSMS } = require('./sms');
@@ -12,24 +12,24 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 // Shared by direct admin creation (already-Upcoming bookings) and request approval
 // (Requested -> Upcoming) so both paths behave identically.
 async function finalizeApprovedBooking(bookingId) {
-  let booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId);
+  let booking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]);
   if (!booking) throw new Error('Booking not found');
 
   // Every confirmed booking needs a reference code for the client status-lookup page/SMS link --
   // bookings created directly by the photographer (not via a public request) don't have one yet.
   if (!booking.reference_code) {
-    const referenceCode = generateUniqueReferenceCode();
-    db.prepare('UPDATE bookings SET reference_code = ? WHERE id = ?').run(referenceCode, bookingId);
+    const referenceCode = await generateUniqueReferenceCode();
+    await db.run('UPDATE bookings SET reference_code = ? WHERE id = ?', [referenceCode, bookingId]);
     booking = { ...booking, reference_code: referenceCode };
   }
 
-  const existingOwed = db.prepare('SELECT id FROM money_owed WHERE booking_id = ?').get(bookingId);
+  const existingOwed = await db.get('SELECT id FROM money_owed WHERE booking_id = ?', [bookingId]);
   if (!existingOwed && booking.balance_due > 0) {
-    db.prepare(`INSERT INTO money_owed (id, booking_id, name, amount, notes, type) VALUES (?, ?, ?, ?, ?, 'booking')`)
-      .run(uuidv4(), bookingId, booking.client_name, booking.balance_due, `Balance for ${booking.shoot_type} shoot on ${booking.shoot_date}`);
+    await db.run(`INSERT INTO money_owed (id, booking_id, name, amount, notes, type) VALUES (?, ?, ?, ?, ?, 'booking')`,
+      [uuidv4(), bookingId, booking.client_name, booking.balance_due, `Balance for ${booking.shoot_type} shoot on ${booking.shoot_date}`]);
   }
 
-  db.prepare("UPDATE clients SET total_shoots = total_shoots + 1, updated_at = datetime('now') WHERE id = ?").run(booking.client_id);
+  await db.run(`UPDATE clients SET total_shoots = total_shoots + 1, updated_at = ${NOW_TS} WHERE id = ?`, [booking.client_id]);
 
   // A booking entered directly as Completed/Cancelled/Denied is a historical/backfilled record,
   // not a live one -- skip the client-facing "your booking is confirmed" email/SMS and calendar
@@ -50,7 +50,7 @@ async function finalizeApprovedBooking(bookingId) {
     }).catch(console.error);
   }
 
-  const finalized = db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId);
+  const finalized = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]);
   if (isLive) gcal.createEvent(finalized).catch(console.error);
   return finalized;
 }

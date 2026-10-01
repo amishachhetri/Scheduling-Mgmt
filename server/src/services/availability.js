@@ -10,8 +10,8 @@ const SLOT_STEP_MINUTES = 30;
 // (e.g. a custom "Other" request, or a package created before durations existed).
 const DEFAULT_DURATION_MINUTES = 120;
 
-function getBufferMinutes() {
-  const profile = db.prepare('SELECT buffer_hours FROM photographer_profile WHERE id = 1').get();
+async function getBufferMinutes() {
+  const profile = await db.get('SELECT buffer_hours FROM photographer_profile WHERE id = 1');
   return (profile?.buffer_hours || 2) * 60;
 }
 
@@ -58,13 +58,13 @@ function bookingDurationMinutes(booking) {
 
 // Duration to use for a NEW booking/request being evaluated (not yet in the DB) -- prefers an
 // explicit shoot_time/shoot_end_time pair, then the chosen package's duration, then the default.
-function resolveDurationMinutes({ shoot_time, shoot_end_time, package_id } = {}) {
+async function resolveDurationMinutes({ shoot_time, shoot_end_time, package_id } = {}) {
   if (shoot_end_time && shoot_time) {
     const d = toMinutes(shoot_end_time) - toMinutes(shoot_time);
     if (d > 0) return d;
   }
   if (package_id) {
-    const pkg = db.prepare('SELECT duration_minutes FROM packages WHERE id = ?').get(package_id);
+    const pkg = await db.get('SELECT duration_minutes FROM packages WHERE id = ?', [package_id]);
     if (pkg?.duration_minutes != null) return pkg.duration_minutes;
   }
   return DEFAULT_DURATION_MINUTES;
@@ -74,8 +74,8 @@ function resolveDurationMinutes({ shoot_time, shoot_end_time, package_id } = {})
 // candidate [shootTime, shootTime+durationMinutes] window, excluding cancelled/denied bookings
 // and (optionally) one booking being edited/approved. Used by the admin manual-booking flow,
 // the requests inbox's conflict flag, and public request submission.
-function findTimeConflicts(shootDate, shootTime, excludeBookingId, durationMinutes) {
-  const buffer = getBufferMinutes();
+async function findTimeConflicts(shootDate, shootTime, excludeBookingId, durationMinutes) {
+  const buffer = await getBufferMinutes();
   const duration = durationMinutes || DEFAULT_DURATION_MINUTES;
   const newStart = toMinutes(shootTime);
   const newEnd = newStart + duration;
@@ -92,7 +92,7 @@ function findTimeConflicts(shootDate, shootTime, excludeBookingId, durationMinut
     params.push(excludeBookingId);
   }
 
-  const candidates = db.prepare(q).all(...params);
+  const candidates = await db.all(q, params);
   return candidates.filter(b => {
     const existingStart = toMinutes(b.shoot_time);
     const existingEnd = existingStart + bookingDurationMinutes(b);
@@ -103,21 +103,21 @@ function findTimeConflicts(shootDate, shootTime, excludeBookingId, durationMinut
 // Literally anything on the calendar that date -- any live booking regardless of its own
 // duration, any multi-day wedding extra day, any block (partial or full-day) -- makes the date
 // unusable for a NEW full-day request, since a full-day shoot needs the entire day free.
-function hasAnyCommitment(dateStr) {
-  const anyBooking = db.prepare(`
+async function hasAnyCommitment(dateStr) {
+  const anyBooking = await db.get(`
     SELECT 1 FROM bookings WHERE shoot_date = ? AND status NOT IN ('Cancelled', 'Denied') LIMIT 1
-  `).get(dateStr);
+  `, [dateStr]);
   if (anyBooking) return true;
 
-  const eventDay = db.prepare(`
+  const eventDay = await db.get(`
     SELECT 1 FROM booking_events be JOIN bookings b ON be.booking_id = b.id
     WHERE be.event_date = ? AND b.status NOT IN ('Cancelled', 'Denied') LIMIT 1
-  `).get(dateStr);
+  `, [dateStr]);
   if (eventDay) return true;
 
-  const anyBlock = db.prepare(`
+  const anyBlock = await db.get(`
     SELECT 1 FROM blocked_dates WHERE date <= ? AND COALESCE(end_date, date) >= ? LIMIT 1
-  `).get(dateStr, dateStr);
+  `, [dateStr, dateStr]);
   return !!anyBlock;
 }
 
@@ -131,26 +131,26 @@ function generateCandidateSlots(durationMinutes) {
 
 // Existing bookings/blocks that occupy time on a date, each already extended by the travel
 // buffer on both sides -- the set a new candidate slot must not intersect.
-function getOccupiedWindows(dateStr) {
-  const buffer = getBufferMinutes();
+async function getOccupiedWindows(dateStr) {
+  const buffer = await getBufferMinutes();
   const windows = [];
 
-  const shortBookings = db.prepare(`
+  const shortBookings = await db.all(`
     SELECT b.shoot_time, b.shoot_end_time, p.duration_minutes FROM bookings b
     LEFT JOIN packages p ON b.package_id = p.id
     WHERE b.shoot_date = ? AND b.status NOT IN ('Cancelled', 'Denied')
     AND COALESCE(p.is_full_day, 0) = 0
-  `).all(dateStr);
+  `, [dateStr]);
   for (const b of shortBookings) {
     const start = toMinutes(b.shoot_time);
     windows.push({ start: start - buffer, end: start + bookingDurationMinutes(b) + buffer });
   }
 
-  const partialBlocks = db.prepare(`
+  const partialBlocks = await db.all(`
     SELECT start_time, end_time FROM blocked_dates
     WHERE date <= ? AND COALESCE(end_date, date) >= ?
     AND all_day = 0 AND start_time IS NOT NULL
-  `).all(dateStr, dateStr);
+  `, [dateStr, dateStr]);
   for (const blk of partialBlocks) {
     const s = toMinutes(blk.start_time);
     const e = blk.end_time ? toMinutes(blk.end_time) : s + buffer;
@@ -162,9 +162,9 @@ function getOccupiedWindows(dateStr) {
 
 // Which of the generated candidate slots (for a given session duration) are already taken on a
 // date, accounting for each existing commitment's own span plus travel buffer on both sides.
-function getTakenSlots(dateStr, durationMinutes) {
+async function getTakenSlots(dateStr, durationMinutes) {
   const duration = durationMinutes || DEFAULT_DURATION_MINUTES;
-  const windows = getOccupiedWindows(dateStr);
+  const windows = await getOccupiedWindows(dateStr);
   const taken = new Set();
   for (const slot of generateCandidateSlots(duration)) {
     const start = toMinutes(slot);
@@ -176,49 +176,50 @@ function getTakenSlots(dateStr, durationMinutes) {
 
 // Full candidate-slot list for a date/duration, each flagged available or not -- what the
 // public booking flow renders as time buttons.
-function getSlotsWithAvailability(dateStr, durationMinutes) {
+async function getSlotsWithAvailability(dateStr, durationMinutes) {
   const duration = durationMinutes || DEFAULT_DURATION_MINUTES;
-  const taken = getTakenSlots(dateStr, duration);
+  const taken = await getTakenSlots(dateStr, duration);
   return generateCandidateSlots(duration).map(t => ({ time: t, available: !taken.has(t) }));
 }
 
 // A day is fully unavailable for a TIMED (non-full-day) request if: a full-day package booking
 // sits on it, it's an extra day of a multi-day wedding, an all-day (or unspecified-time) block
 // covers it, or every candidate slot for this session's duration is already taken.
-function isFullyBookedDay(dateStr, durationMinutes) {
-  const fullDayBooking = db.prepare(`
+async function isFullyBookedDay(dateStr, durationMinutes) {
+  const fullDayBooking = await db.get(`
     SELECT 1 FROM bookings b LEFT JOIN packages p ON b.package_id = p.id
     WHERE b.shoot_date = ? AND b.status NOT IN ('Cancelled', 'Denied')
     AND COALESCE(p.is_full_day, 0) = 1
     LIMIT 1
-  `).get(dateStr);
+  `, [dateStr]);
   if (fullDayBooking) return true;
 
-  const eventDay = db.prepare(`
+  const eventDay = await db.get(`
     SELECT 1 FROM booking_events be JOIN bookings b ON be.booking_id = b.id
     WHERE be.event_date = ? AND b.status NOT IN ('Cancelled', 'Denied')
     LIMIT 1
-  `).get(dateStr);
+  `, [dateStr]);
   if (eventDay) return true;
 
-  const allDayBlock = db.prepare(`
+  const allDayBlock = await db.get(`
     SELECT 1 FROM blocked_dates
     WHERE date <= ? AND COALESCE(end_date, date) >= ?
     AND (all_day = 1 OR start_time IS NULL)
     LIMIT 1
-  `).get(dateStr, dateStr);
+  `, [dateStr, dateStr]);
   if (allDayBlock) return true;
 
   const duration = durationMinutes || DEFAULT_DURATION_MINUTES;
   const candidates = generateCandidateSlots(duration);
   if (candidates.length === 0) return true; // this session doesn't even fit business hours
-  return getTakenSlots(dateStr, duration).size >= candidates.length;
+  const taken = await getTakenSlots(dateStr, duration);
+  return taken.size >= candidates.length;
 }
 
 // Day-level availability for the public calendar. `options.fullDayRequest` (true for weddings)
 // requires the ENTIRE day to be free of any commitment; otherwise a day is only unavailable if
 // it's blocked at the full-day level or every slot for `options.durationMinutes` is taken.
-function getUnavailableDates(startDate, endDate, options = {}) {
+async function getUnavailableDates(startDate, endDate, options = {}) {
   const { durationMinutes, fullDayRequest } = options;
   const dates = [];
   let d = new Date(startDate + 'T00:00:00');
@@ -227,8 +228,12 @@ function getUnavailableDates(startDate, endDate, options = {}) {
     dates.push(d.toISOString().split('T')[0]);
     d.setDate(d.getDate() + 1);
   }
-  if (fullDayRequest) return dates.filter(hasAnyCommitment);
-  return dates.filter(dt => isFullyBookedDay(dt, durationMinutes));
+  if (fullDayRequest) {
+    const flags = await Promise.all(dates.map(dt => hasAnyCommitment(dt)));
+    return dates.filter((dt, i) => flags[i]);
+  }
+  const flags = await Promise.all(dates.map(dt => isFullyBookedDay(dt, durationMinutes)));
+  return dates.filter((dt, i) => flags[i]);
 }
 
 module.exports = {
