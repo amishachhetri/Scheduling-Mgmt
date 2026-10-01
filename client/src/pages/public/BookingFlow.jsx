@@ -246,7 +246,7 @@ export default function BookingFlow() {
                   <div className="font-display text-lg">{p.name}</div>
                   <p className="text-sm text-ink-soft leading-relaxed flex-1">{p.description}</p>
                   <div className="font-mono text-lg pt-1 border-t border-line flex items-baseline justify-between">
-                    <span>${p.price.toLocaleString()}</span>
+                    <span>{p.shoot_type?.toLowerCase().includes('multi-day') ? 'Starting at ' : ''}${p.price.toLocaleString()}</span>
                     <span className="font-sans text-xs text-ink-faint">
                       {p.is_full_day ? 'Full day' : `~${p.duration_minutes % 60 === 0 ? p.duration_minutes / 60 : (p.duration_minutes / 60).toFixed(1)} hr`}
                     </span>
@@ -275,7 +275,7 @@ export default function BookingFlow() {
           </button>
 
           <h1 className="font-display text-2xl mb-1">Pick a date</h1>
-          <p className="text-sm text-ink-soft mb-5">{selectedPackage.name} · {selectedPackage.price != null ? `$${selectedPackage.price.toLocaleString()}` : 'Custom quote'}</p>
+          <p className="text-sm text-ink-soft mb-5">{selectedPackage.name} · {selectedPackage.price != null ? `${isMultiDay ? 'Starting at ' : ''}$${selectedPackage.price.toLocaleString()}` : 'Custom quote'}</p>
 
           {isMultiDay && (
             <p className="text-sm text-ink-soft mb-3 bg-paper-sunken border border-line rounded px-3 py-2">

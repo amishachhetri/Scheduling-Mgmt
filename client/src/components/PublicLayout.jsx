@@ -36,7 +36,7 @@ export default function PublicLayout() {
 
   return (
     <div className="public-site min-h-screen bg-paper text-ink font-sans flex flex-col">
-      <header className="border-b border-line relative z-20 bg-paper">
+      <header className="border-b border-accent relative z-20 bg-paper">
         <div className="flex items-center justify-between gap-3 px-6 md:px-10 py-4">
           <Link to="/" className="flex items-center gap-2.5 min-w-0">
             <img src={logoLockup} alt={businessName} className="h-12 w-auto shrink-0" />
