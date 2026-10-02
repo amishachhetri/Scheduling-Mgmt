@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Calendar, Camera, DollarSign, Users, Settings, Bell, Sun, Moon, X, Inbox, LogOut, Image, MoreHorizontal, BarChart3 } from 'lucide-react';
+import { Home, Calendar, Camera, DollarSign, Users, Settings, Bell, Sun, Moon, X, Inbox, LogOut, Image, MoreHorizontal, BarChart3, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext.jsx';
 import api from '../utils/api.js';
 import logoMarkCharcoal from '../assets/logo/mark-charcoal.png';
@@ -15,7 +15,8 @@ const NAV = [
   { to: '/admin/clients', label: 'Clients', Icon: Users },
   { to: '/admin/portfolio', label: 'Portfolio', Icon: Image },
   { to: '/admin/reports', label: 'Reports', Icon: BarChart3 },
-  { to: '/admin/settings', label: 'Settings', Icon: Settings }
+  { to: '/admin/settings', label: 'Settings', Icon: Settings },
+  { to: '/admin/trash', label: 'Trash', Icon: Trash2 }
 ];
 
 const MOBILE_PRIMARY = NAV.filter(n => n.mobilePrimary);

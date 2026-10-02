@@ -4,6 +4,7 @@ const { sendTemplateEmail } = require('./email');
 const { sendTemplateSMS } = require('./sms');
 const { generateUniqueReferenceCode } = require('./referenceCode');
 const gcal = require('./googleCalendar');
+const cloudinary = require('./cloudinary');
 
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
@@ -55,4 +56,31 @@ async function finalizeApprovedBooking(bookingId) {
   return finalized;
 }
 
-module.exports = { finalizeApprovedBooking };
+// The actual hard delete, run once a trashed booking's 24-hour window is up (see
+// services/cron.js). The Google Calendar event is already gone by this point -- that happens
+// immediately when the booking is trashed, not deferred to purge time.
+async function permanentlyDeleteBooking(bookingId) {
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [bookingId]);
+  if (!booking) return;
+  // Children first -- FK constraints reject deleting a bookings row while these still reference it.
+  const galleries = await db.all('SELECT * FROM galleries WHERE booking_id = ?', [bookingId]);
+  for (const gallery of galleries) {
+    const photos = await db.all('SELECT * FROM gallery_photos WHERE gallery_id = ?', [gallery.id]);
+    await db.run('DELETE FROM gallery_photos WHERE gallery_id = ?', [gallery.id]);
+    if (cloudinary.isConfigured()) {
+      for (const p of photos) {
+        if (p.public_id) cloudinary.deleteAsset(p.public_id, p.resource_type || 'image').catch(console.error);
+      }
+    }
+  }
+  await db.run('DELETE FROM galleries WHERE booking_id = ?', [bookingId]);
+  await db.run('DELETE FROM second_shooters WHERE booking_id = ?', [bookingId]);
+  await db.run('DELETE FROM workflow_notes WHERE booking_id = ?', [bookingId]);
+  await db.run('DELETE FROM money_owed WHERE booking_id = ?', [bookingId]);
+  await db.run('DELETE FROM reminders WHERE booking_id = ?', [bookingId]);
+  await db.run('DELETE FROM booking_events WHERE booking_id = ?', [bookingId]);
+  await db.run('DELETE FROM message_log WHERE booking_id = ?', [bookingId]);
+  await db.run('DELETE FROM bookings WHERE id = ?', [bookingId]);
+}
+
+module.exports = { finalizeApprovedBooking, permanentlyDeleteBooking };

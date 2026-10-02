@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mail, Phone, Plus, Pencil } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, Plus, Pencil, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api.js';
 import { formatDate, formatTime, formatCurrency } from '../utils/helpers.js';
@@ -16,6 +16,8 @@ export default function ClientDetail() {
   const [editModal, setEditModal] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '' });
   const [saving, setSaving] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -48,6 +50,18 @@ export default function ClientDetail() {
       toast.error(err.response?.data?.error || 'Failed to update client');
     }
     setSaving(false);
+  };
+
+  const deleteClient = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/clients/${id}`);
+      toast.success('Client moved to Trash');
+      navigate('/admin/clients');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete client');
+      setDeleting(false);
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center h-48 text-gray-400">Loading...</div>;
@@ -139,6 +153,26 @@ export default function ClientDetail() {
           </div>
         </div>
       )}
+
+      <button onClick={() => setDeleteModal(true)}
+        className="flex items-center gap-1.5 text-sm text-red-500 hover:text-red-600 px-1">
+        <Trash2 className="w-3.5 h-3.5" /> Delete this client
+      </button>
+
+      <Modal open={deleteModal} onClose={() => setDeleteModal(false)} title="Delete Client?">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            This will move <strong>{client.name}</strong> to Trash. You can restore it from there within 24 hours, after which it's gone for good.
+            {client.total_shoots > 0 && ' Delete their bookings first — a client with shoot history can\'t be removed.'}
+          </p>
+          <div className="flex gap-3">
+            <button onClick={() => setDeleteModal(false)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm dark:border-gray-600 dark:text-white">Cancel</button>
+            <button onClick={deleteClient} disabled={deleting} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
+              <Trash2 className="w-4 h-4" /> {deleting ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={editModal} onClose={() => setEditModal(false)} title="Edit Contact Info">
         <div className="space-y-3">

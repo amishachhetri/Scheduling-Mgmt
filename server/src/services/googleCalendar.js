@@ -112,7 +112,7 @@ async function deleteEvent(booking) {
 
 async function syncAll() {
   if (!(await isConnected())) return { synced: 0 };
-  const bookings = await db.all("SELECT * FROM bookings WHERE status != 'Cancelled'");
+  const bookings = await db.all("SELECT * FROM bookings WHERE status != 'Cancelled' AND deleted_at IS NULL");
   let synced = 0;
   for (const b of bookings) {
     if (b.google_calendar_event_id) {

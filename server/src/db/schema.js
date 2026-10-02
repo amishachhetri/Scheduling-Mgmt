@@ -320,6 +320,8 @@ async function initDB() {
     ALTER TABLE packages ADD COLUMN IF NOT EXISTS extra_photo_price REAL;
     ALTER TABLE photographer_profile ADD COLUMN IF NOT EXISTS last_daily_run_date TEXT;
     ALTER TABLE photographer_profile ADD COLUMN IF NOT EXISTS admin_password_hash TEXT;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deleted_at TEXT;
+    ALTER TABLE clients ADD COLUMN IF NOT EXISTS deleted_at TEXT;
   `);
 
   // One-time backfill: the admin password used to live only in the ADMIN_PASSWORD_HASH env var

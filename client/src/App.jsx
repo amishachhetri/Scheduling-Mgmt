@@ -17,6 +17,7 @@ import ClientDetail from './pages/ClientDetail.jsx';
 import Portfolio from './pages/Portfolio.jsx';
 import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
+import Trash from './pages/Trash.jsx';
 import AdminLogin from './pages/AdminLogin.jsx';
 import PublicHome from './pages/public/Home.jsx';
 import PublicPackages from './pages/public/Packages.jsx';
@@ -67,6 +68,7 @@ export default function App() {
                   <Route path="portfolio" element={<Portfolio />} />
                   <Route path="reports" element={<Reports />} />
                   <Route path="settings" element={<Settings />} />
+                  <Route path="trash" element={<Trash />} />
                   <Route path="*" element={<Navigate to="/admin" replace />} />
                 </Route>
               </Routes>

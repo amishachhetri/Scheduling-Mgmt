@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
   // 1. Owed TO him, tied to a booking -- any unpaid balance, upcoming shoot or past.
   const moneyOwedBookings = await db.get(`
     SELECT COALESCE(SUM(m.amount), 0) as total FROM money_owed m JOIN bookings b ON m.booking_id = b.id
-    WHERE m.paid = 0
+    WHERE m.paid = 0 AND b.deleted_at IS NULL
   `);
   // 2. Owed TO him, not tied to any booking (a loan, a print order, etc.).
   const moneyOwedManual = await db.get(`
@@ -31,11 +31,11 @@ router.get('/', async (req, res) => {
   // display, but breaks a strict `=== 1` check client-side, so these are cast back to a plain
   // int right in the query instead.
   const upcomingCount = await db.get(
-    `SELECT COUNT(*)::int as count FROM bookings WHERE shoot_date >= ? AND shoot_date <= ? AND status = 'Upcoming'`, [today, monthEnd]
+    `SELECT COUNT(*)::int as count FROM bookings WHERE shoot_date >= ? AND shoot_date <= ? AND status = 'Upcoming' AND deleted_at IS NULL`, [today, monthEnd]
   );
 
   const pendingRequests = await db.get(
-    `SELECT COUNT(*)::int as count FROM bookings WHERE status = 'Requested'`
+    `SELECT COUNT(*)::int as count FROM bookings WHERE status = 'Requested' AND deleted_at IS NULL`
   );
 
   const reminders = await db.get(`SELECT COUNT(*)::int as count FROM reminders WHERE dismissed = 0`);
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
   const activeProjects = await db.all(`
     SELECT id, client_name, shoot_type, shoot_date, workflow_stage, status, balance_due
     FROM bookings
-    WHERE status NOT IN ('Cancelled', 'Denied', 'Requested') AND workflow_stage != 'Project closed'
+    WHERE status NOT IN ('Cancelled', 'Denied', 'Requested') AND workflow_stage != 'Project closed' AND deleted_at IS NULL
     ORDER BY shoot_date ASC
   `);
 
@@ -58,13 +58,13 @@ router.get('/', async (req, res) => {
   const pastProjects = await db.all(`
     SELECT id, client_name, shoot_type, shoot_date, workflow_stage, status
     FROM bookings
-    WHERE workflow_stage = 'Project closed'
+    WHERE workflow_stage = 'Project closed' AND deleted_at IS NULL
     ORDER BY shoot_date DESC
     LIMIT 15
   `);
 
   const recentBookings = await db.all(
-    `SELECT id, client_name, shoot_type, shoot_date, status, created_at FROM bookings ORDER BY created_at DESC LIMIT 5`
+    `SELECT id, client_name, shoot_type, shoot_date, status, created_at FROM bookings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 5`
   );
   const recentMessages = await db.all(
     `SELECT id, client_name, template_type, sent_at FROM message_log ORDER BY sent_at DESC LIMIT 5`
@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
   ].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 10);
 
   const upcomingShoots = await db.all(
-    `SELECT * FROM bookings WHERE shoot_date >= ? AND shoot_date <= ? AND status = 'Upcoming' ORDER BY shoot_date ASC, shoot_time ASC`, [today, monthEnd]
+    `SELECT * FROM bookings WHERE shoot_date >= ? AND shoot_date <= ? AND status = 'Upcoming' AND deleted_at IS NULL ORDER BY shoot_date ASC, shoot_time ASC`, [today, monthEnd]
   );
 
   res.json({
@@ -96,7 +96,7 @@ router.get('/', async (req, res) => {
 // chart. Not part of the daily view; this is the "how's business doing overall" check.
 router.get('/business', async (req, res) => {
   const incomeExpr = `CASE WHEN deposit_received = 1 THEN package_price - COALESCE(discount,0) - balance_due ELSE 0 END`;
-  const notCancelled = `status NOT IN ('Cancelled','Denied','Requested')`;
+  const notCancelled = `status NOT IN ('Cancelled','Denied','Requested') AND deleted_at IS NULL`;
 
   const income = async (whereExtra, params = []) => (await db.get(
     `SELECT COALESCE(SUM(${incomeExpr}), 0) as total FROM bookings WHERE ${notCancelled} ${whereExtra}`, params
@@ -153,7 +153,7 @@ function sendCSV(res, filename, headers, rows) {
 }
 
 router.get('/export/bookings', async (req, res) => {
-  const bookings = await db.all('SELECT * FROM bookings ORDER BY shoot_date DESC');
+  const bookings = await db.all('SELECT * FROM bookings WHERE deleted_at IS NULL ORDER BY shoot_date DESC');
   sendCSV(res, 'bookings.csv',
     ['Date', 'Client', 'Email', 'Phone', 'Type', 'Location', 'Package', 'Price', 'Discount', 'Deposit', 'Balance', 'Status', 'Stage'],
     bookings.map(b => [
@@ -167,9 +167,9 @@ router.get('/export/bookings', async (req, res) => {
 router.get('/export/clients', async (req, res) => {
   const clients = await db.all(`
     SELECT c.*,
-      (SELECT COUNT(*)::int FROM bookings b WHERE b.client_id = c.id) as total_shoots,
-      (SELECT COALESCE(SUM(b.deposit_amount), 0) FROM bookings b WHERE b.client_id = c.id AND b.deposit_received = 1) as total_spent
-    FROM clients c ORDER BY c.name ASC
+      (SELECT COUNT(*)::int FROM bookings b WHERE b.client_id = c.id AND b.deleted_at IS NULL) as total_shoots,
+      (SELECT COALESCE(SUM(b.deposit_amount), 0) FROM bookings b WHERE b.client_id = c.id AND b.deposit_received = 1 AND b.deleted_at IS NULL) as total_spent
+    FROM clients c WHERE c.deleted_at IS NULL ORDER BY c.name ASC
   `);
   sendCSV(res, 'clients.csv',
     ['Name', 'Email', 'Phone', 'Total Shoots', 'Total Spent'],

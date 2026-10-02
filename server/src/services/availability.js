@@ -85,6 +85,7 @@ async function findTimeConflicts(shootDate, shootTime, excludeBookingId, duratio
     LEFT JOIN packages p ON b.package_id = p.id
     WHERE b.shoot_date = ?
     AND b.status NOT IN ('Cancelled', 'Denied')
+    AND b.deleted_at IS NULL
   `;
   const params = [shootDate];
   if (excludeBookingId) {
@@ -105,13 +106,13 @@ async function findTimeConflicts(shootDate, shootTime, excludeBookingId, duratio
 // unusable for a NEW full-day request, since a full-day shoot needs the entire day free.
 async function hasAnyCommitment(dateStr) {
   const anyBooking = await db.get(`
-    SELECT 1 FROM bookings WHERE shoot_date = ? AND status NOT IN ('Cancelled', 'Denied') LIMIT 1
+    SELECT 1 FROM bookings WHERE shoot_date = ? AND status NOT IN ('Cancelled', 'Denied') AND deleted_at IS NULL LIMIT 1
   `, [dateStr]);
   if (anyBooking) return true;
 
   const eventDay = await db.get(`
     SELECT 1 FROM booking_events be JOIN bookings b ON be.booking_id = b.id
-    WHERE be.event_date = ? AND b.status NOT IN ('Cancelled', 'Denied') LIMIT 1
+    WHERE be.event_date = ? AND b.status NOT IN ('Cancelled', 'Denied') AND b.deleted_at IS NULL LIMIT 1
   `, [dateStr]);
   if (eventDay) return true;
 
@@ -138,7 +139,7 @@ async function getOccupiedWindows(dateStr) {
   const shortBookings = await db.all(`
     SELECT b.shoot_time, b.shoot_end_time, p.duration_minutes FROM bookings b
     LEFT JOIN packages p ON b.package_id = p.id
-    WHERE b.shoot_date = ? AND b.status NOT IN ('Cancelled', 'Denied')
+    WHERE b.shoot_date = ? AND b.status NOT IN ('Cancelled', 'Denied') AND b.deleted_at IS NULL
     AND COALESCE(p.is_full_day, 0) = 0
   `, [dateStr]);
   for (const b of shortBookings) {
@@ -188,7 +189,7 @@ async function getSlotsWithAvailability(dateStr, durationMinutes) {
 async function isFullyBookedDay(dateStr, durationMinutes) {
   const fullDayBooking = await db.get(`
     SELECT 1 FROM bookings b LEFT JOIN packages p ON b.package_id = p.id
-    WHERE b.shoot_date = ? AND b.status NOT IN ('Cancelled', 'Denied')
+    WHERE b.shoot_date = ? AND b.status NOT IN ('Cancelled', 'Denied') AND b.deleted_at IS NULL
     AND COALESCE(p.is_full_day, 0) = 1
     LIMIT 1
   `, [dateStr]);
@@ -196,7 +197,7 @@ async function isFullyBookedDay(dateStr, durationMinutes) {
 
   const eventDay = await db.get(`
     SELECT 1 FROM booking_events be JOIN bookings b ON be.booking_id = b.id
-    WHERE be.event_date = ? AND b.status NOT IN ('Cancelled', 'Denied')
+    WHERE be.event_date = ? AND b.status NOT IN ('Cancelled', 'Denied') AND b.deleted_at IS NULL
     LIMIT 1
   `, [dateStr]);
   if (eventDay) return true;

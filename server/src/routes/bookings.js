@@ -6,7 +6,6 @@ const gcal = require('../services/googleCalendar');
 const availability = require('../services/availability');
 const { finalizeApprovedBooking } = require('../services/bookingLifecycle');
 const { sendTemplateEmail } = require('../services/email');
-const cloudinary = require('../services/cloudinary');
 
 const STAGES = [
   'Shoot scheduled',
@@ -21,7 +20,7 @@ const STAGES = [
 
 router.get('/', async (req, res) => {
   const { status, shoot_type, client_id, sort } = req.query;
-  let q = 'SELECT * FROM bookings WHERE 1=1';
+  let q = 'SELECT * FROM bookings WHERE deleted_at IS NULL';
   const params = [];
   if (status) { q += ' AND status = ?'; params.push(status); }
   if (shoot_type) { q += ' AND shoot_type = ?'; params.push(shoot_type); }
@@ -35,8 +34,28 @@ router.get('/', async (req, res) => {
   res.json(await db.all(q, params));
 });
 
+// Must come before GET /:id -- otherwise Express matches "trash" as an :id instead.
+router.get('/trash', async (req, res) => {
+  const rows = await db.all("SELECT * FROM bookings WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC");
+  res.json(rows);
+});
+
+router.post('/:id/restore', async (req, res) => {
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NOT NULL', [req.params.id]);
+  if (!booking) return res.status(404).json({ error: 'Not in trash' });
+  await db.run(`UPDATE bookings SET deleted_at = NULL, updated_at = ${NOW_TS} WHERE id = ?`, [req.params.id]);
+  await db.run(`UPDATE clients SET total_shoots = total_shoots + 1, updated_at = ${NOW_TS} WHERE id = ?`, [booking.client_id]);
+  const restored = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
+  // The calendar event was removed when this was trashed -- recreate it now that it's back,
+  // same as any other live booking (finalizeApprovedBooking does this on first creation).
+  if (!['Completed', 'Cancelled', 'Denied'].includes(restored.status)) {
+    gcal.createEvent(restored).catch(console.error);
+  }
+  res.json(restored);
+});
+
 router.get('/:id', async (req, res) => {
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!booking) return res.status(404).json({ error: 'Not found' });
   booking.second_shooters = await db.all('SELECT * FROM second_shooters WHERE booking_id = ?', [req.params.id]);
   booking.workflow_notes = await db.all('SELECT * FROM workflow_notes WHERE booking_id = ? ORDER BY created_at ASC', [req.params.id]);
@@ -68,8 +87,9 @@ router.post('/', async (req, res) => {
   const newDuration = await availability.resolveDurationMinutes({ shoot_time, shoot_end_time, package_id });
   const conflicts = await availability.findTimeConflicts(shoot_date, shoot_time, undefined, newDuration);
 
-  // Upsert client
-  let client = await db.get('SELECT * FROM clients WHERE LOWER(name) = LOWER(?)', [client_name]);
+  // Upsert client -- a trashed client is treated as not found, so a new booking for the same
+  // name starts a fresh client record rather than silently reviving one someone deleted.
+  let client = await db.get('SELECT * FROM clients WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL', [client_name]);
   const clientId = client?.id || uuidv4();
   if (!client) {
     await db.run('INSERT INTO clients (id, name, email, phone) VALUES (?, ?, ?, ?)', [clientId, client_name, client_email, client_phone]);
@@ -126,7 +146,7 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
-  const existing = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
+  const existing = await db.get('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
   const {
@@ -216,7 +236,7 @@ router.put('/:id', async (req, res) => {
 // Reschedule endpoint — logs old→new date in workflow_notes, updates Google Calendar
 router.put('/:id/reschedule', async (req, res) => {
   const { shoot_date, shoot_time, shoot_end_time, note, event_id } = req.body;
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!booking) return res.status(404).json({ error: 'Not found' });
 
   if (event_id) {
@@ -257,7 +277,7 @@ router.put('/:id/reschedule', async (req, res) => {
 // Cancel with deposit decision
 router.put('/:id/cancel', async (req, res) => {
   const { cancellation_note, deposit_decision } = req.body;
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!booking) return res.status(404).json({ error: 'Not found' });
 
   await db.run(`UPDATE bookings SET status = 'Cancelled', cancellation_note = ?, deposit_decision = ?, updated_at = ${NOW_TS} WHERE id = ?`,
@@ -290,7 +310,7 @@ router.put('/:id/workflow', async (req, res) => {
   const { stage, note, gallery_link } = req.body;
   if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Invalid stage' });
 
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!booking) return res.status(404).json({ error: 'Not found' });
 
   const now = new Date().toISOString();
@@ -345,29 +365,15 @@ router.put('/:id/workflow', async (req, res) => {
   res.json(afterWorkflow);
 });
 
+// Soft delete -- moves the booking to Trash (see GET /trash, POST /:id/restore) instead of
+// removing it outright. A daily job permanently purges anything still there after 24h (see
+// services/cron.js + services/bookingLifecycle.js's permanentlyDeleteBooking, which has the
+// cascade cleanup and Cloudinary/Google Calendar removal this route used to do directly).
 router.delete('/:id', async (req, res) => {
-  const booking = await db.get('SELECT * FROM bookings WHERE id = ?', [req.params.id]);
+  const booking = await db.get('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
   if (!booking) return res.status(404).json({ error: 'Not found' });
   gcal.deleteEvent(booking).catch(console.error);
-  // Children first -- FK constraints reject deleting a bookings row while these still reference it.
-  const galleries = await db.all('SELECT * FROM galleries WHERE booking_id = ?', [req.params.id]);
-  for (const gallery of galleries) {
-    const photos = await db.all('SELECT * FROM gallery_photos WHERE gallery_id = ?', [gallery.id]);
-    await db.run('DELETE FROM gallery_photos WHERE gallery_id = ?', [gallery.id]);
-    if (cloudinary.isConfigured()) {
-      for (const p of photos) {
-        if (p.public_id) cloudinary.deleteAsset(p.public_id, p.resource_type || 'image').catch(console.error);
-      }
-    }
-  }
-  await db.run('DELETE FROM galleries WHERE booking_id = ?', [req.params.id]);
-  await db.run('DELETE FROM second_shooters WHERE booking_id = ?', [req.params.id]);
-  await db.run('DELETE FROM workflow_notes WHERE booking_id = ?', [req.params.id]);
-  await db.run('DELETE FROM money_owed WHERE booking_id = ?', [req.params.id]);
-  await db.run('DELETE FROM reminders WHERE booking_id = ?', [req.params.id]);
-  await db.run('DELETE FROM booking_events WHERE booking_id = ?', [req.params.id]);
-  await db.run('DELETE FROM message_log WHERE booking_id = ?', [req.params.id]);
-  await db.run('DELETE FROM bookings WHERE id = ?', [req.params.id]);
+  await db.run(`UPDATE bookings SET deleted_at = ${NOW_TS} WHERE id = ?`, [req.params.id]);
   await db.run('UPDATE clients SET total_shoots = GREATEST(0, total_shoots - 1) WHERE id = ?', [booking.client_id]);
   res.json({ success: true });
 });

@@ -98,7 +98,7 @@ export default function BookingDetail() {
     setBusy(true);
     try {
       await api.delete(`/bookings/${id}`);
-      toast.success('Booking deleted');
+      toast.success('Booking moved to Trash');
       refresh();
       navigate('/admin/bookings');
     } catch {
@@ -524,7 +524,7 @@ export default function BookingDetail() {
       <Modal open={deleteModal} onClose={() => setDeleteModal(false)} title="Delete Booking?">
         <div className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            This will permanently delete the booking for <strong>{booking.client_name}</strong> and all associated data.
+            This will move the booking for <strong>{booking.client_name}</strong> to Trash. You can restore it from there within 24 hours, after which it's gone for good.
           </p>
           <div className="flex gap-3">
             <button onClick={() => setDeleteModal(false)} className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm dark:border-gray-600 dark:text-white">Cancel</button>

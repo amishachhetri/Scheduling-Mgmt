@@ -9,7 +9,7 @@ const { adminAuth } = require('../middleware/adminAuth');
 // mounting adminAuth at the prefix level would intercept those requests too.
 router.get('/', adminAuth, async (req, res) => {
   const { start, end } = req.query;
-  let bookingQ = "SELECT * FROM bookings WHERE status NOT IN ('Cancelled','Denied','Requested')";
+  let bookingQ = "SELECT * FROM bookings WHERE status NOT IN ('Cancelled','Denied','Requested') AND deleted_at IS NULL";
   const params = [];
   if (start) { bookingQ += ' AND shoot_date >= ?'; params.push(start); }
   if (end) { bookingQ += ' AND shoot_date <= ?'; params.push(end); }
@@ -41,9 +41,9 @@ router.get('/', adminAuth, async (req, res) => {
   const multiDayEventsQ = start && end
     ? `SELECT be.*, b.client_name, b.id as booking_id, b.status, b.workflow_stage
        FROM booking_events be JOIN bookings b ON be.booking_id = b.id
-       WHERE b.status NOT IN ('Cancelled','Denied','Requested') AND be.event_date >= ? AND be.event_date <= ?`
+       WHERE b.status NOT IN ('Cancelled','Denied','Requested') AND b.deleted_at IS NULL AND be.event_date >= ? AND be.event_date <= ?`
     : `SELECT be.*, b.client_name, b.id as booking_id, b.status, b.workflow_stage
-       FROM booking_events be JOIN bookings b ON be.booking_id = b.id WHERE b.status NOT IN ('Cancelled','Denied','Requested')`;
+       FROM booking_events be JOIN bookings b ON be.booking_id = b.id WHERE b.status NOT IN ('Cancelled','Denied','Requested') AND b.deleted_at IS NULL`;
   const multiDayItems = start && end
     ? await db.all(multiDayEventsQ, [start, end])
     : await db.all(multiDayEventsQ);

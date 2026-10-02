@@ -19,7 +19,7 @@ const PAGE_WIDTH = PAGE_RIGHT - PAGE_LEFT;
 // Same "amount collected to date" formula as dashboard.js's /business (which feeds the Reports
 // page) -- kept identical so this PDF and Reports never disagree on income for the same year.
 const INCOME_EXPR = `CASE WHEN deposit_received = 1 THEN package_price - COALESCE(discount,0) - balance_due ELSE 0 END`;
-const NOT_CANCELLED = `status NOT IN ('Cancelled','Denied','Requested')`;
+const NOT_CANCELLED = `status NOT IN ('Cancelled','Denied','Requested') AND deleted_at IS NULL`;
 
 async function streamAnnualReportPDF(res, year) {
   const profile = await db.get('SELECT name, business_name FROM photographer_profile WHERE id = 1');

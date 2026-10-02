@@ -7,7 +7,7 @@ const { finalizeApprovedBooking } = require('../services/bookingLifecycle');
 const availability = require('../services/availability');
 
 router.get('/', async (req, res) => {
-  const requests = await db.all("SELECT * FROM bookings WHERE status = 'Requested' ORDER BY created_at ASC");
+  const requests = await db.all("SELECT * FROM bookings WHERE status = 'Requested' AND deleted_at IS NULL ORDER BY created_at ASC");
   const withDetails = await Promise.all(requests.map(async r => ({
     ...r,
     has_conflict: (await availability.findTimeConflicts(r.shoot_date, r.shoot_time, r.id, await availability.resolveDurationMinutes(r))).length > 0,

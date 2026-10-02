@@ -36,7 +36,7 @@ router.delete('/:id', async (req, res) => {
 // this used to sum only deposit_amount, which understated income for anything paid beyond
 // the initial deposit and disagreed with the Reports page for the same year.
 const INCOME_EXPR = `CASE WHEN deposit_received = 1 THEN package_price - COALESCE(discount,0) - balance_due ELSE 0 END`;
-const NOT_CANCELLED = `status NOT IN ('Cancelled','Denied','Requested')`;
+const NOT_CANCELLED = `status NOT IN ('Cancelled','Denied','Requested') AND deleted_at IS NULL`;
 
 router.get('/summary', async (req, res) => {
   const { year } = req.query;

@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
   if (!profile?.ics_feed_token || req.query.token !== profile.ics_feed_token) {
     return res.status(401).json({ error: 'Invalid or missing calendar feed token' });
   }
-  const bookings = await db.all("SELECT * FROM bookings WHERE status NOT IN ('Denied','Requested') ORDER BY shoot_date ASC");
+  const bookings = await db.all("SELECT * FROM bookings WHERE status NOT IN ('Denied','Requested') AND deleted_at IS NULL ORDER BY shoot_date ASC");
   const ics = wrapICS(bookings.map(bookingToVEVENT));
   res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
   res.setHeader('Content-Disposition', 'inline; filename="shoots.ics"');

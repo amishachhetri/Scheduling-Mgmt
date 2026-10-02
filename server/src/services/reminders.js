@@ -7,7 +7,7 @@ async function generateReminders() {
 
   await db.run(`DELETE FROM reminders WHERE type IN ('no_followup', 'balance_unpaid', 'workflow_stuck', 'ss_payment', 'contract_unsigned') AND dismissed = 0`);
 
-  const bookings = await db.all(`SELECT * FROM bookings WHERE status NOT IN ('Completed', 'Cancelled', 'Denied', 'Requested')`);
+  const bookings = await db.all(`SELECT * FROM bookings WHERE status NOT IN ('Completed', 'Cancelled', 'Denied', 'Requested') AND deleted_at IS NULL`);
 
   const inserts = [];
 
@@ -48,7 +48,7 @@ async function generateReminders() {
   const pendingSS = await db.all(`
     SELECT ss.*, b.client_name as shoot_client, b.shoot_date
     FROM second_shooters ss JOIN bookings b ON ss.booking_id = b.id
-    WHERE ss.paid = 0 AND b.shoot_date < ?
+    WHERE ss.paid = 0 AND b.shoot_date < ? AND b.deleted_at IS NULL
   `, [todayStr]);
 
   for (const ss of pendingSS) {

@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { db, NOW_TS, NOW_DATE } = require('../db/schema');
 const { sendTemplateEmail } = require('./email');
 const { generateReminders } = require('./reminders');
+const { permanentlyDeleteBooking } = require('./bookingLifecycle');
 
 async function runDailyTasks() {
   console.log('[cron] Running daily tasks...');
@@ -11,7 +12,7 @@ async function runDailyTasks() {
   const tomorrowStr = new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   // Day-before reminders
-  const tomorrowShoots = await db.all(`SELECT * FROM bookings WHERE shoot_date = ? AND status = 'Upcoming'`, [tomorrowStr]);
+  const tomorrowShoots = await db.all(`SELECT * FROM bookings WHERE shoot_date = ? AND status = 'Upcoming' AND deleted_at IS NULL`, [tomorrowStr]);
   for (const b of tomorrowShoots) {
     sendTemplateEmail('day_before_reminder', {
       booking_id: b.id, client_id: b.client_id,
@@ -25,7 +26,7 @@ async function runDailyTasks() {
   if (template) {
     const days = template.timing_days || 7;
     const targetDate = new Date(today.getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const unpaid = await db.all(`SELECT * FROM bookings WHERE shoot_date = ? AND balance_due > 0 AND deposit_received = 0 AND status = 'Upcoming'`, [targetDate]);
+    const unpaid = await db.all(`SELECT * FROM bookings WHERE shoot_date = ? AND balance_due > 0 AND deposit_received = 0 AND status = 'Upcoming' AND deleted_at IS NULL`, [targetDate]);
     for (const b of unpaid) {
       sendTemplateEmail('payment_reminder', {
         booking_id: b.id, client_id: b.client_id,
@@ -37,7 +38,7 @@ async function runDailyTasks() {
 
   // Review requests (3 days after project closed)
   const completedRecently = await db.all(`
-    SELECT * FROM bookings WHERE status = 'Completed' AND TO_CHAR(updated_at::timestamp, 'YYYY-MM-DD') = TO_CHAR((NOW() AT TIME ZONE 'UTC') - INTERVAL '3 days', 'YYYY-MM-DD')
+    SELECT * FROM bookings WHERE status = 'Completed' AND deleted_at IS NULL AND TO_CHAR(updated_at::timestamp, 'YYYY-MM-DD') = TO_CHAR((NOW() AT TIME ZONE 'UTC') - INTERVAL '3 days', 'YYYY-MM-DD')
   `);
   for (const b of completedRecently) {
     const alreadySent = await db.get(`SELECT id FROM message_log WHERE booking_id = ? AND template_type = 'review_request'`, [b.id]);
@@ -58,11 +59,21 @@ async function runDailyTasks() {
       status = 'Completed',
       workflow_stage = CASE WHEN workflow_stage = 'Shoot scheduled' THEN 'Shoot completed' ELSE workflow_stage END,
       updated_at = ${NOW_TS}
-    WHERE shoot_date < ? AND status = 'Upcoming'
+    WHERE shoot_date < ? AND status = 'Upcoming' AND deleted_at IS NULL
   `, [todayStr]);
 
   // Generate reminder alerts
   await generateReminders();
+
+  // Empty the trash -- anything sitting there more than 24h is gone for good. Bookings get the
+  // full cascade cleanup (galleries/Cloudinary/money-owed/etc); clients have nothing of their
+  // own left to cascade (their bookings are trashed/purged independently).
+  const expiredBookings = await db.all(`SELECT id FROM bookings WHERE deleted_at IS NOT NULL AND deleted_at < TO_CHAR((NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours', 'YYYY-MM-DD HH24:MI:SS')`);
+  for (const b of expiredBookings) {
+    await permanentlyDeleteBooking(b.id);
+  }
+  await db.run(`DELETE FROM message_log WHERE client_id IN (SELECT id FROM clients WHERE deleted_at IS NOT NULL AND deleted_at < TO_CHAR((NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours', 'YYYY-MM-DD HH24:MI:SS'))`);
+  await db.run(`DELETE FROM clients WHERE deleted_at IS NOT NULL AND deleted_at < TO_CHAR((NOW() AT TIME ZONE 'UTC') - INTERVAL '24 hours', 'YYYY-MM-DD HH24:MI:SS')`);
 
   await db.run(`UPDATE photographer_profile SET last_daily_run_date = ${NOW_DATE} WHERE id = 1`);
 

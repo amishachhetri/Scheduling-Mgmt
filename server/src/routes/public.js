@@ -79,7 +79,7 @@ router.get('/booking-status', statusLimiter, async (req, res) => {
   if (!email || !code) return res.status(400).json({ error: 'email and code are required' });
 
   const booking = await db.get(
-    'SELECT * FROM bookings WHERE reference_code = ? AND LOWER(client_email) = LOWER(?)', [code.trim(), email.trim()]
+    'SELECT * FROM bookings WHERE reference_code = ? AND LOWER(client_email) = LOWER(?) AND deleted_at IS NULL', [code.trim(), email.trim()]
   );
 
   if (!booking) return res.status(404).json({ error: "We couldn't find a request with that reference code and email." });
@@ -193,7 +193,7 @@ router.post('/booking-requests', submitLimiter, async (req, res) => {
     return res.status(409).json({ error: 'That time was just booked by someone else. Please pick another.' });
   }
 
-  let client = await db.get('SELECT * FROM clients WHERE LOWER(name) = LOWER(?)', [client_name]);
+  let client = await db.get('SELECT * FROM clients WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL', [client_name]);
   const clientId = client?.id || uuidv4();
   if (!client) {
     await db.run('INSERT INTO clients (id, name, email, phone) VALUES (?, ?, ?, ?)', [clientId, client_name, client_email, client_phone]);
